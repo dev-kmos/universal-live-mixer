@@ -1,7 +1,7 @@
 use std::{
     array,
     sync::{
-        atomic::{AtomicBool, AtomicU32, Ordering},
+        atomic::{AtomicU32, Ordering},
         Arc,
     },
 };
@@ -12,12 +12,13 @@ use jack::{
 };
 
 use crate::{
-    audio::{AudioEngine, AudioError, ChannelAudioParams, SharedMixerState},
+    audio::{AudioEngine, AudioError, ChannelAudioParams, MasterAudioParams, SharedMixerState},
     mixer::state::{MeterState, MixerState},
 };
 
 const INPUT_CHANNELS: usize = 4;
 const SILENCE_DB: f32 = -90.0;
+const SMOOTHING_COEFF: f32 = 0.0007;
 
 type ActiveJackClient = AsyncClient<JackNotifications, MixerProcess>;
 
@@ -39,6 +40,7 @@ impl JackAudioEngine {
             let params = channel.audio_params();
             self.realtime.update_channel(params);
         }
+        self.realtime.update_master(mixer.master.audio_params());
     }
 }
 
@@ -81,6 +83,8 @@ impl AudioEngine for JackAudioEngine {
             inputs: [input_1, input_2, input_3, input_4],
             main_l,
             main_r,
+            current_channel_gains: [SmoothedStereoGain::default(); INPUT_CHANNELS],
+            current_master_gain: 1.0,
         };
 
         let active_client = client
@@ -108,6 +112,11 @@ impl AudioEngine for JackAudioEngine {
         }
 
         self.realtime.update_channel(params);
+        Ok(())
+    }
+
+    fn update_master(&self, params: MasterAudioParams) -> Result<(), AudioError> {
+        self.realtime.update_master(params);
         Ok(())
     }
 }
@@ -139,6 +148,8 @@ struct MixerProcess {
     inputs: [Port<AudioIn>; INPUT_CHANNELS],
     main_l: Port<AudioOut>,
     main_r: Port<AudioOut>,
+    current_channel_gains: [SmoothedStereoGain; INPUT_CHANNELS],
+    current_master_gain: f32,
 }
 
 impl ProcessHandler for MixerProcess {
@@ -162,15 +173,24 @@ impl ProcessHandler for MixerProcess {
 
             for channel_index in 0..INPUT_CHANNELS {
                 let params = &self.realtime.channels[channel_index];
-                if params.mute.load(Ordering::Relaxed) {
-                    continue;
-                }
 
-                let gain_l = load_f32(&params.gain_l_bits);
-                let gain_r = load_f32(&params.gain_r_bits);
+                // One-pole smoothing: target gains come from atomics updated
+                // by the control thread, while the callback keeps local
+                // current gains and approaches targets sample by sample. This
+                // avoids zipper noise on fader/pan/mute/scene recall without
+                // locks, allocation, trig or dB conversion in the realtime
+                // path. At 48 kHz this coefficient is roughly a 30 ms time
+                // constant, which is responsive enough for live control while
+                // avoiding clicks on scene changes.
+                let target_l = load_f32(&params.gain_l_bits);
+                let target_r = load_f32(&params.gain_r_bits);
+                let current_gains = &mut self.current_channel_gains[channel_index];
+                current_gains.left += (target_l - current_gains.left) * SMOOTHING_COEFF;
+                current_gains.right += (target_r - current_gains.right) * SMOOTHING_COEFF;
+
                 let dry_sample = inputs[channel_index][frame];
-                let channel_l = dry_sample * gain_l;
-                let channel_r = dry_sample * gain_r;
+                let channel_l = dry_sample * current_gains.left;
+                let channel_r = dry_sample * current_gains.right;
                 let channel_peak = channel_l.abs().max(channel_r.abs());
                 if channel_peak > channel_peaks[channel_index] {
                     channel_peaks[channel_index] = channel_peak;
@@ -180,11 +200,17 @@ impl ProcessHandler for MixerProcess {
                 mixed_r += channel_r;
             }
 
-            main_l[frame] = mixed_l;
-            main_r[frame] = mixed_r;
+            let target_master_gain = load_f32(&self.realtime.master_gain_bits);
+            self.current_master_gain +=
+                (target_master_gain - self.current_master_gain) * SMOOTHING_COEFF;
+            let output_l = mixed_l * self.current_master_gain;
+            let output_r = mixed_r * self.current_master_gain;
 
-            let abs_l = mixed_l.abs();
-            let abs_r = mixed_r.abs();
+            main_l[frame] = output_l;
+            main_r[frame] = output_r;
+
+            let abs_l = output_l.abs();
+            let abs_r = output_r.abs();
             if abs_l > master_peak_l {
                 master_peak_l = abs_l;
             }
@@ -205,6 +231,7 @@ impl ProcessHandler for MixerProcess {
 
 struct RealtimeState {
     channels: [RealtimeChannelParams; INPUT_CHANNELS],
+    master_gain_bits: AtomicU32,
     channel_peak_bits: [AtomicU32; INPUT_CHANNELS],
     master_peak_l_bits: AtomicU32,
     master_peak_r_bits: AtomicU32,
@@ -214,6 +241,7 @@ impl RealtimeState {
     fn new() -> Self {
         Self {
             channels: array::from_fn(|_| RealtimeChannelParams::default()),
+            master_gain_bits: AtomicU32::new(1.0_f32.to_bits()),
             channel_peak_bits: array::from_fn(|_| AtomicU32::new(0.0_f32.to_bits())),
             master_peak_l_bits: AtomicU32::new(0.0_f32.to_bits()),
             master_peak_r_bits: AtomicU32::new(0.0_f32.to_bits()),
@@ -222,11 +250,14 @@ impl RealtimeState {
 
     fn update_channel(&self, params: ChannelAudioParams) {
         if let Some(channel) = self.channels.get(params.channel_id) {
-            let gains = channel_gains(params.fader_db, params.pan);
-            channel.mute.store(params.mute, Ordering::Relaxed);
+            let gains = channel_target_gains(params.fader_db, params.pan, params.mute);
             store_f32(&channel.gain_l_bits, gains.left);
             store_f32(&channel.gain_r_bits, gains.right);
         }
+    }
+
+    fn update_master(&self, params: MasterAudioParams) {
+        store_f32(&self.master_gain_bits, master_gain(params.fader_db));
     }
 
     fn meters(&self) -> MeterState {
@@ -246,8 +277,22 @@ impl RealtimeState {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+struct SmoothedStereoGain {
+    left: f32,
+    right: f32,
+}
+
+impl Default for SmoothedStereoGain {
+    fn default() -> Self {
+        Self {
+            left: std::f32::consts::FRAC_1_SQRT_2,
+            right: std::f32::consts::FRAC_1_SQRT_2,
+        }
+    }
+}
+
 struct RealtimeChannelParams {
-    mute: AtomicBool,
     gain_l_bits: AtomicU32,
     gain_r_bits: AtomicU32,
 }
@@ -255,7 +300,6 @@ struct RealtimeChannelParams {
 impl Default for RealtimeChannelParams {
     fn default() -> Self {
         Self {
-            mute: AtomicBool::new(false),
             gain_l_bits: AtomicU32::new(std::f32::consts::FRAC_1_SQRT_2.to_bits()),
             gain_r_bits: AtomicU32::new(std::f32::consts::FRAC_1_SQRT_2.to_bits()),
         }
@@ -266,6 +310,17 @@ impl Default for RealtimeChannelParams {
 struct ChannelGains {
     left: f32,
     right: f32,
+}
+
+fn channel_target_gains(fader_db: f32, pan: f32, mute: bool) -> ChannelGains {
+    if mute {
+        ChannelGains {
+            left: 0.0,
+            right: 0.0,
+        }
+    } else {
+        channel_gains(fader_db, pan)
+    }
 }
 
 fn channel_gains(fader_db: f32, pan: f32) -> ChannelGains {
@@ -281,6 +336,10 @@ fn channel_gains(fader_db: f32, pan: f32) -> ChannelGains {
         left: linear * pan_angle.cos(),
         right: linear * pan_angle.sin(),
     }
+}
+
+fn master_gain(fader_db: f32) -> f32 {
+    db_to_linear(fader_db.clamp(-60.0, 10.0))
 }
 
 fn db_to_linear(db: f32) -> f32 {
@@ -309,16 +368,24 @@ fn store_f32(target: &AtomicU32, value: f32) {
 
 #[cfg(test)]
 mod tests {
-    use super::{channel_gains, db_to_linear};
+    use super::{channel_gains, channel_target_gains, db_to_linear, master_gain};
 
     const EPSILON: f32 = 0.000_01;
 
     #[test]
     fn zero_db_center_pan_is_minus_three_db_per_side() {
-        let gains = channel_gains(0.0, 0.0);
+        let gains = channel_target_gains(0.0, 0.0, false);
 
         assert_close(gains.left, std::f32::consts::FRAC_1_SQRT_2);
         assert_close(gains.right, std::f32::consts::FRAC_1_SQRT_2);
+    }
+
+    #[test]
+    fn muted_channel_target_gain_is_silent() {
+        let gains = channel_target_gains(0.0, 0.0, true);
+
+        assert_close(gains.left, 0.0);
+        assert_close(gains.right, 0.0);
     }
 
     #[test]
@@ -362,6 +429,12 @@ mod tests {
         assert_close(left.right, 0.0);
         assert_close(right.left, 0.0);
         assert_close(right.right, 1.0);
+    }
+
+    #[test]
+    fn master_fader_gain_is_clamped() {
+        assert_close(master_gain(-90.0), 0.0);
+        assert_close(master_gain(24.0), db_to_linear(10.0));
     }
 
     fn assert_close(actual: f32, expected: f32) {

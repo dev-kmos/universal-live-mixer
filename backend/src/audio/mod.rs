@@ -20,12 +20,18 @@ pub struct ChannelAudioParams {
     pub pan: f32,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct MasterAudioParams {
+    pub fader_db: f32,
+}
+
 #[allow(dead_code)]
 pub trait AudioEngine: Send + Sync {
     fn start(&mut self, mixer: SharedMixerState) -> Result<(), AudioError>;
     fn stop(&mut self) -> Result<(), AudioError>;
     fn meters(&self) -> MeterState;
     fn update_channel(&self, params: ChannelAudioParams) -> Result<(), AudioError>;
+    fn update_master(&self, params: MasterAudioParams) -> Result<(), AudioError>;
 }
 
 #[derive(Debug)]

@@ -6,7 +6,7 @@ mod persistence;
 use std::{net::SocketAddr, sync::Arc};
 
 use axum::{
-    routing::{get, patch},
+    routing::{get, patch, post},
     Router,
 };
 use tokio::sync::RwLock;
@@ -49,11 +49,19 @@ async fn main() {
         .route("/api/health", get(api::health))
         .route("/api/mixer", get(api::get_mixer))
         .route("/api/channels/{channel_id}", patch(api::patch_channel))
+        .route("/api/master", patch(api::patch_master))
         .route("/api/meters", get(api::get_meters))
+        .route("/api/scenes", get(api::list_scenes).post(api::create_scene))
+        .route("/api/scenes/next", post(api::load_next_scene))
+        .route("/api/scenes/previous", post(api::load_previous_scene))
         .route(
-            "/api/scenes/{scene_name}",
-            get(api::load_scene).post(api::save_scene),
+            "/api/scenes/current/reload",
+            post(api::reload_current_scene),
         )
+        .route("/api/scenes/{scene_id}/save", post(api::save_scene))
+        .route("/api/scenes/{scene_id}/load", post(api::load_scene))
+        .route("/api/scenes/{scene_id}", patch(api::rename_scene))
+        .route("/api/scenes/{scene_id}/move", post(api::move_scene))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
         .with_state(state);

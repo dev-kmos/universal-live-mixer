@@ -38,6 +38,11 @@ pub struct ChannelPatch {
     pub pan: Option<f32>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct MasterPatch {
+    pub fader_db: Option<f32>,
+}
+
 impl MixerState {
     pub fn focusrite_4i4_default() -> Self {
         Self {
@@ -90,6 +95,20 @@ impl ChannelState {
     }
 }
 
+impl MasterState {
+    pub fn apply_patch(&mut self, patch: MasterPatch) {
+        if let Some(fader_db) = patch.fader_db {
+            self.fader_db = fader_db.clamp(-60.0, 10.0);
+        }
+    }
+
+    pub fn audio_params(&self) -> crate::audio::MasterAudioParams {
+        crate::audio::MasterAudioParams {
+            fader_db: self.fader_db,
+        }
+    }
+}
+
 impl MeterState {
     pub fn silent(channel_count: usize) -> Self {
         Self {
@@ -101,7 +120,7 @@ impl MeterState {
 
 #[cfg(test)]
 mod tests {
-    use super::{ChannelPatch, ChannelState};
+    use super::{ChannelPatch, ChannelState, MasterPatch, MasterState};
 
     #[test]
     fn channel_patch_updates_name_mute_and_clamps_parameters() {
@@ -136,5 +155,23 @@ mod tests {
         assert!(channel.mute);
         assert_eq!(channel.fader_db, -60.0);
         assert_eq!(channel.pan, 1.0);
+    }
+
+    #[test]
+    fn master_patch_clamps_fader() {
+        let mut master = MasterState {
+            mute: false,
+            fader_db: 0.0,
+        };
+
+        master.apply_patch(MasterPatch {
+            fader_db: Some(24.0),
+        });
+        assert_eq!(master.fader_db, 10.0);
+
+        master.apply_patch(MasterPatch {
+            fader_db: Some(-90.0),
+        });
+        assert_eq!(master.fader_db, -60.0);
     }
 }

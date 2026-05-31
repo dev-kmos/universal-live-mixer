@@ -1,5 +1,5 @@
 use crate::{
-    audio::{AudioEngine, AudioError, ChannelAudioParams, SharedMixerState},
+    audio::{AudioEngine, AudioError, ChannelAudioParams, MasterAudioParams, SharedMixerState},
     mixer::state::MeterState,
 };
 
@@ -39,6 +39,10 @@ impl AudioEngine for NullAudioEngine {
     }
 
     fn update_channel(&self, _params: ChannelAudioParams) -> Result<(), AudioError> {
+        Ok(())
+    }
+
+    fn update_master(&self, _params: MasterAudioParams) -> Result<(), AudioError> {
         Ok(())
     }
 }

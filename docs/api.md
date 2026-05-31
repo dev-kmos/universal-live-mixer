@@ -77,6 +77,27 @@ Rules:
 
 Response: full mixer state.
 
+## Patch Master
+
+```http
+PATCH /master
+Content-Type: application/json
+```
+
+Request:
+
+```json
+{
+  "fader_db": -6.0
+}
+```
+
+Rules:
+
+- `fader_db` is clamped to `-60.0..10.0`.
+
+Response: full mixer state.
+
 ## Get Meters
 
 ```http
@@ -95,22 +116,125 @@ Response:
 The MVP uses polling. Production should use WebSocket or a compact binary/event
 stream to avoid wasteful HTTP request churn.
 
+## List Scenes
+
+```http
+GET /scenes
+```
+
+Response:
+
+```json
+{
+  "version": 1,
+  "current_scene_id": "scene-1",
+  "scenes": [
+    {
+      "id": "scene-1",
+      "name": "Default",
+      "file": "default.json"
+    }
+  ]
+}
+```
+
+If `scenes/index.json` does not exist, the backend creates it. Existing
+`scenes/default.json` is preserved and added as the first scene.
+
+## Create Scene
+
+```http
+POST /scenes
+Content-Type: application/json
+```
+
+Request:
+
+```json
+{
+  "name": "Intro"
+}
+```
+
+Creates a new scene from the current mixer state and makes it current.
+
 ## Save Scene
 
 ```http
-POST /scenes/{scene_name}
+POST /scenes/{scene_id}/save
 ```
 
-Saves the current mixer state as:
-
-```text
-scenes/{scene_name}.json
-```
+Overwrites the scene with the current mixer state.
 
 ## Load Scene
 
 ```http
-GET /scenes/{scene_name}
+POST /scenes/{scene_id}/load
 ```
 
-Loads a JSON scene and replaces the current mixer state.
+Loads the scene, replaces mixer state and synchronizes channel parameters and
+master fader with the audio engine.
+
+Response:
+
+```json
+{
+  "scenes": {
+    "version": 1,
+    "current_scene_id": "scene-1",
+    "scenes": []
+  },
+  "mixer": {}
+}
+```
+
+## Rename Scene
+
+```http
+PATCH /scenes/{scene_id}
+Content-Type: application/json
+```
+
+Request:
+
+```json
+{
+  "name": "Vocal Check"
+}
+```
+
+## Move Scene
+
+```http
+POST /scenes/{scene_id}/move
+Content-Type: application/json
+```
+
+Request:
+
+```json
+{
+  "direction": "up"
+}
+```
+
+`direction` can be `up` or `down`.
+
+## Previous / Next Scene
+
+```http
+POST /scenes/previous
+POST /scenes/next
+```
+
+Loads the previous or next scene by manifest order, wrapping at the ends.
+
+## Reload Current Scene
+
+```http
+POST /scenes/current/reload
+```
+
+Reloads the current scene from disk without changing scene order. This replaces
+mixer state and synchronizes channel parameters and master fader with the audio
+engine. If no current scene exists, the backend returns `404`.
