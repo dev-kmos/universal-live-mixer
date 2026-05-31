@@ -1,0 +1,163 @@
+:root {
+  color-scheme: dark;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  background: #151515;
+  color: #f1f1f1;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+.shell {
+  min-height: 100vh;
+  background:
+    linear-gradient(180deg, #202020 0%, #151515 100%);
+  padding: 18px;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.topbar h1 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.topbar p {
+  margin: 4px 0 0;
+  color: #a9a9a9;
+  font-size: 13px;
+}
+
+.primary {
+  border: 1px solid #5e8fcb;
+  background: #2f6ea8;
+  color: #fff;
+  border-radius: 6px;
+  padding: 10px 14px;
+  cursor: pointer;
+}
+
+.mixer {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(126px, 1fr));
+  gap: 12px;
+  overflow-x: auto;
+}
+
+.strip {
+  min-width: 126px;
+  min-height: 520px;
+  display: grid;
+  grid-template-rows: auto 1fr auto auto auto auto;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid #343434;
+  background: #242424;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.strip.master {
+  background: #292929;
+  border-color: #4a4a4a;
+}
+
+.strip-name {
+  text-align: center;
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.meter {
+  width: 24px;
+  height: 180px;
+  justify-self: center;
+  align-self: end;
+  display: flex;
+  align-items: end;
+  border: 1px solid #505050;
+  background: #111;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.meter.stereo {
+  height: 150px;
+}
+
+.meter-fill {
+  width: 100%;
+  height: 0%;
+  background: linear-gradient(180deg, #d44 0%, #d8b842 25%, #39b35b 100%);
+  transition: height 80ms linear;
+}
+
+label {
+  display: grid;
+  gap: 8px;
+  color: #cfcfcf;
+  font-size: 12px;
+}
+
+.fader {
+  width: 100%;
+}
+
+output {
+  text-align: center;
+  color: #d7d7d7;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+
+.mute {
+  border: 1px solid #7a4444;
+  background: #3a2a2a;
+  color: #f1caca;
+  border-radius: 6px;
+  padding: 10px;
+  cursor: pointer;
+}
+
+.mute.active {
+  background: #b32222;
+  border-color: #e04444;
+  color: #fff;
+}
+
+.master-label {
+  color: #cfcfcf;
+  text-align: center;
+  font-size: 13px;
+}
+
+@media (max-width: 760px) {
+  .topbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .mixer {
+    grid-template-columns: repeat(5, 126px);
+  }
+}
+

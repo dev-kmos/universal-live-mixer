@@ -1,0 +1,40 @@
+{
+  "device_profile": "focusrite-scarlett-4i4",
+  "sample_rate": 48000,
+  "buffer_size": 128,
+  "channels": [
+    {
+      "id": 0,
+      "name": "CH 1",
+      "mute": false,
+      "fader_db": 0.0,
+      "pan": 0.0
+    },
+    {
+      "id": 1,
+      "name": "CH 2",
+      "mute": false,
+      "fader_db": 0.0,
+      "pan": 0.0
+    },
+    {
+      "id": 2,
+      "name": "CH 3",
+      "mute": false,
+      "fader_db": 0.0,
+      "pan": 0.0
+    },
+    {
+      "id": 3,
+      "name": "CH 4",
+      "mute": false,
+      "fader_db": 0.0,
+      "pan": 0.0
+    }
+  ],
+  "master": {
+    "mute": false,
+    "fader_db": 0.0
+  }
+}
+
